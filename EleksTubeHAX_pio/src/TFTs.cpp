@@ -73,6 +73,182 @@ void TFTs::showNoMqttStatus() {
   print("NO MQTT !");
 }
 
+void TFTs::ChipSelectByNumber(int tft_no) {
+    // tfts are numbered 0-5 from left to right
+  if(tft_no==0) chip_select.setHoursTens();
+  if(tft_no==1) chip_select.setHoursOnes();  // used by showTemperature
+  if(tft_no==2) chip_select.setMinutesTens();
+  if(tft_no==3) chip_select.setMinutesOnes(); // used by showNoMqttStatus
+  if(tft_no==4) chip_select.setSecondsTens();  
+  if(tft_no==5) chip_select.setSecondsOnes();  // used by showNoWifiStatus
+}
+
+void TFTs::showTextLabel(const char* text, int tft_no) {
+  ChipSelectByNumber(tft_no);
+  setTextColor(TFT_RED, TFT_BLACK);
+  setCursor(5, TFT_HEIGHT - 27, 4);
+  print(text);
+}
+
+// WIP:
+void TFTs::showLongTextSplitted(String text) {
+
+  byte tft_no = 0;
+  ChipSelectByNumber(tft_no);
+
+  int charsPerTft = text.length() / 6;
+
+  // Split the text into lines
+  for (int i = 0; i < text.length(); i += charsPerTft) {
+      String splitted_line = text.substring(i, i + charsPerTft);
+
+      setTextColor(TFT_WHITE, TFT_BLACK);
+      setCursor(0, 0, 4);  // TODO: use a bigger font
+      print(splitted_line);
+
+      tft_no += 1;
+      if(tft_no>=6) break;
+      ChipSelectByNumber(tft_no);
+
+#ifdef DEBUG_OUTPUT
+    Serial.print(splitted_line);
+    Serial.print(",");
+    Serial.print(charsPerTft);
+#endif
+  }
+}
+
+
+void TFTs::showLongText(const char* text) {
+  // repeat the same text on all LCDs
+  
+  for(int i=0 ; i<6 ; i++) {
+      ChipSelectByNumber(i);
+      fillRect(0, 0, TFT_WIDTH, TFT_HEIGHT/2, TFT_BLACK); // clear top half screens
+      setTextColor(TFT_WHITE, TFT_BLACK);
+      setCursor(0, 0, 4);
+      print(text);
+  }
+}
+
+void TFTs::showSpectrogram(const char* equalizer_str) {
+    byte i = 0;
+    char cur_c = ' ';
+    byte cur_v = 0;
+    byte r=0;
+    byte g=0;
+    byte b=1;
+    uint32_t color;
+    
+    //const byte BARS_PER_TFT = strlen(equalizer_str) / 6;
+    const byte BARS_PER_TFT = 2;
+    const byte BARS_WIDTH = TFT_WIDTH / BARS_PER_TFT;
+    const byte BARS_HEIGHT_UNIT = TFT_HEIGHT / 20;
+    byte bars_in_curr_tft = 0;
+    byte tft_no = 0;
+    ChipSelectByNumber(tft_no);
+    //fillScreen(TFT_BLACK); // clear the screen
+    fillRect(0, TFT_HEIGHT/2, TFT_WIDTH, TFT_HEIGHT/2, TFT_BLACK); // only half
+
+#ifdef DEBUG_OUTPUT
+    Serial.print(equalizer_str);
+    Serial.print(",");
+    Serial.print(BARS_PER_TFT);
+    Serial.print(",");
+    Serial.print(BARS_WIDTH);
+    Serial.print(",");
+    Serial.println(BARS_HEIGHT_UNIT);
+#endif
+
+    for (int i = 0; i < strlen(equalizer_str); i++) {
+        cur_c = equalizer_str[i];
+        if(cur_c >= '0' && cur_c <= '9') { // check if it is a valid int
+          cur_v = (byte)(cur_c - '0');
+          // change color according to value
+          if(cur_v==0) {
+            r=0; g=0; b=0;  // balck
+            color = TFT_BLACK;
+          } else if(cur_v>=7) {
+            r=1; g=0; b=0;  // red
+            color = TFT_RED;
+          } else if(cur_v>=5) {
+            r=1; g=1; b=0;  // yellow
+            color = TFT_YELLOW;
+          } else if(cur_v>=3) {
+            r=0; g=1; b=0; // green
+            color = TFT_GREEN;
+          } else if(cur_v>=1) {
+            r=0; g=0; b=1; // blue
+            color = TFT_BLUE;
+          } /*else if(cur_v>=1) {
+            r=1; g=0; b=1; // purple
+          }*/
+          // draw the rect
+          //color = color565(r, g, b);
+
+#ifdef DEBUG_OUTPUT
+    Serial.print(cur_v);
+    Serial.print(",");
+    Serial.print((bars_in_curr_tft * BARS_WIDTH));
+    Serial.print(",");
+    Serial.print((TFT_HEIGHT - BARS_HEIGHT_UNIT * cur_v));
+    Serial.print(",");
+    Serial.println(tft_no);
+#endif
+          
+          // void TFT_eSPI::fillRect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color)  
+          fillRect((bars_in_curr_tft * BARS_WIDTH), (TFT_HEIGHT - BARS_HEIGHT_UNIT * cur_v), BARS_WIDTH, BARS_HEIGHT_UNIT * cur_v, color);
+          
+          // switch tft if necessary
+          bars_in_curr_tft += 1;
+          if (bars_in_curr_tft >= BARS_PER_TFT) {
+            tft_no += 1;
+            if(tft_no>=6) break;  // no space left
+            ChipSelectByNumber(tft_no);
+            //fillScreen(TFT_BLACK); // clear the screen
+            fillRect(0, TFT_HEIGHT/2, TFT_WIDTH, TFT_HEIGHT/2, TFT_BLACK); // only half
+            bars_in_curr_tft = 0;
+          }
+        }
+    } //end for
+}
+
+
+void TFTs::showCustomImage(String base64Data) {
+
+  /* WIP:
+  // Decode Base64 data
+  size_t outputLength;
+  unsigned char* decodedData = base64_decode(base64Data.c_str(), base64Data.length(), &outputLength);
+  */
+  uint8_t* decodedData = (uint8_t*) base64Data.c_str();
+
+  // BMP header is 54 bytes
+  int bmpOffset = 54;
+  int bmpWidth = decodedData[18] + (decodedData[19] << 8); // BMP width
+  int bmpHeight = decodedData[22] + (decodedData[23] << 8); // BMP height
+  int colorsUsed = decodedData[46] + (decodedData[47] << 8); // Number of colors used
+
+ for(int i=0 ; i<6 ; i++) {
+      ChipSelectByNumber(i);
+      fillRect(0, 0, TFT_WIDTH, TFT_HEIGHT, TFT_BLACK); // clear screen
+
+      // Display image
+      setAddrWindow(0, 0, bmpWidth - 1, bmpHeight - 1);
+      
+      // Palette starts right after the header
+      int paletteOffset = bmpOffset;
+
+      // Adjust the start of pixel data to account for the palette
+      int pixelsOffset = paletteOffset + colorsUsed * 4;
+
+      // Display image
+      pushColors(&decodedData[pixelsOffset], bmpWidth * bmpHeight);
+      //pushImage(0,0, TFT_WIDTH, TFT_HEIGHT, (uint16_t *)UnpackedImageBuffer);
+  }
+
+}
+
 void TFTs::enableAllDisplays() {
   #ifdef DEBUG_OUTPUT_TFT
     Serial.println("TFTs::enableAllDisplays");
@@ -131,6 +307,8 @@ void TFTs::setDigit(uint8_t digit, uint8_t value, show_t show) {
   uint8_t old_value = digits[digit];
   digits[digit] = value;
   
+  // MEMO: digit is the display counter
+  
   if (show != no && (old_value != value || show == force)) {
     showDigit(digit);
 
@@ -139,7 +317,7 @@ void TFTs::setDigit(uint8_t digit, uint8_t value, show_t show) {
         showNoWifiStatus();
       }    
 
-    if (digit == SECONDS_TENS) 
+    if (digit == MINUTES_ONES) 
       if (!MqttConnected) { 
         showNoMqttStatus();
       }

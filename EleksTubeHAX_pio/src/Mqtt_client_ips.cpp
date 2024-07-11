@@ -76,6 +76,60 @@ void sendToBroker(const char* topic, const char* message) {
   }
 }
 
+
+
+// List of topics
+const char* topics[] = {
+  "topic/1",
+  "topic/2",
+  "topic/3",
+  "topic/4",
+  "topic/5",
+  "topic/6"
+};
+
+// Array to store the last published message IDs for each topic
+String lastMessageIDs[6];
+
+// Function to generate a unique message ID
+String generateMessageID() {
+  return String(millis());
+}
+
+void MqttCallback(char* topic, byte* payload, unsigned int length) {
+  String message = "";
+  for (unsigned int i = 0; i < length; i++) {
+    message += (char)payload[i];
+  }
+  
+  Serial.println(topic);
+  Serial.println(message);
+
+  // Extract message ID from the received message
+  int separatorIndex = message.indexOf(':');
+  if (separatorIndex != -1) {
+    String messageID = message.substring(0, separatorIndex);
+
+    // Determine which topic this message belongs to
+    /*
+    for (int i = 0; i < 6; i++) {
+      if (strcmp(topic, topics[i]) == 0) {
+        // Check if the message ID is different from the last published message ID for this topic
+        if (messageID != lastMessageIDs[i]) {
+          String actualMessage = message.substring(separatorIndex + 1);
+          Serial.print("Message received on ");
+          Serial.print(topic);
+          Serial.print(": ");
+          Serial.println(actualMessage);
+        } else {
+          Serial.println("Received own message, ignoring...");
+        }
+        break;
+      }
+    }*/
+  }
+}
+
 void MqttStart() {
 #ifdef MQTT_ENABLED
   MqttConnected = false;
@@ -104,12 +158,14 @@ void MqttStart() {
     char subscribeTopic[100];
     sprintf(subscribeTopic, "%s/#", MQTT_CLIENT);
     MQTTclient.subscribe(subscribeTopic);  //Subscribes to all messages send to the device
-
+    
     sendToBroker("report/online", "true");  // Reports that the device is online
     sendToBroker("report/firmware", FIRMWARE_VERSION);  // Reports the firmware version
     sendToBroker("report/ip", (char*)WiFi.localIP().toString().c_str());  // Reports the ip
     sendToBroker("report/network", (char*)WiFi.SSID().c_str());  // Reports the network name
     MqttReportWiFiSignal();
+    
+    MQTTclient.setCallback(MqttCallback);
   }
 #endif
 }

@@ -53,6 +53,7 @@ void updateDstEveryNight(void);
 void drawMenu();
 void handlePowerSwitchPressed();
 void handleMQTTCommands();
+void handleSerialCommands();
 #ifdef HARDWARE_NovelLife_SE_CLOCK // NovelLife_SE Clone XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 void gestureStart();
 void handleGestureInterupt(void); //only for NovelLife SE
@@ -158,6 +159,7 @@ void setup() {
   Serial.println("Setup finished!");
 }
 
+
 void loop() {
   uint32_t millis_at_top = millis();
 
@@ -167,6 +169,7 @@ void loop() {
   buttons.loop(); // Sets the states of the buttons, by the detected button presses, releases and gives the time of the press
 
   handleMQTTCommands(); // Handle MQTT commands, afer the buttons loop, to simulate button presses from MQTT, if needed
+  handleSerialCommands();
 
   #ifdef HARDWARE_NovelLife_SE_CLOCK // NovelLife_SE Clone XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
   handleGestureInterupt();
@@ -205,6 +208,16 @@ void loop() {
         tfts.setDigit(HOURS_ONES, uclock.getHoursOnes(), TFTs::force);  // show latest clock digit and temperature readout together
         bTemperatureUpdated = false;
       }
+      /*
+      PeriodicReadMqtt();
+      if (bMqttTxtUpdated) {
+        // update all the displays to draw the text
+        for(int i=0; i<; i++) {
+          tfts.setDigit(HOURS_ONES, uclock.getHoursOnes(), TFTs::force);  // show latest clock digit and temperature readout together
+        }
+        bMqttTxtUpdated = false;
+      }*/
+      
       // run once a day (= 744 times per month which is below the limit of 5k for free account)
       if (DstNeedsUpdate) { // Daylight savings time changes at 3 in the morning
         if (GetGeoLocationTimeZoneOffset()) {
@@ -222,12 +235,14 @@ void loop() {
       }
     }
   }
+  /*
 #ifdef DEBUG_OUTPUT  
   if (time_in_loop <= 1) Serial.print(".");
   else {
     Serial.print("time spent in loop (ms): ");Serial.println(time_in_loop);
   }
 #endif
+* */
 }
 #ifdef HARDWARE_NovelLife_SE_CLOCK // NovelLife_SE Clone XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 void gestureStart()
@@ -422,6 +437,108 @@ void handleMQTTCommands() {
   #endif //MQTT_ENABLED
 } //HandleMQTTCommands
 
+
+int clockState = 0;  // 0=clock mode, !0 -> PC controlled mode
+const int MIN_CMD_LEN = 8;
+const byte EQUALIZER_STR_SIZE = 11;  // TODO: detect variable lenght
+
+void handleSerialCommands() {
+  String cmd_str;
+  
+    if (Serial.available() >= MIN_CMD_LEN) {    
+      cmd_str = Serial.readStringUntil('\n');
+    } else {
+      // try again on next iteration
+      return;
+    }
+
+  #ifdef DEBUG_OUTPUT
+    Serial.println("received serial cmd: " + cmd_str);
+  #endif 
+  
+  if(cmd_str.startsWith("SENSORS: ")){
+    // parse as system resource monitor string "SENSORS: CPU: XX, MEM: XX, ANY: XX"
+    char label1[10] = { 0 };
+    char label2[10] = { 0 };
+    char label3[10] = { 0 };
+    int value1 = 0;
+    int value2 = 0;
+    int value3 = 0;
+    int r = sscanf(cmd_str.c_str(), "SENSORS: %9[^:]: %d, %9[^:]: %d, %9[^:]: %d", label1, &value1, label2, &value2, label3, &value3);
+    // TODO: check r == 6
+  #ifdef DEBUG_OUTPUT
+    Serial.println("parsed sensors data:");
+    Serial.println(label1);
+    Serial.println(value1);
+    Serial.println(label2);
+    Serial.println(value2);
+    Serial.println(label3);
+    Serial.println(value3);
+  #endif 
+  
+    clockState = 1; // no longer showing the clock
+
+  tfts.current_graphic = 1; 
+  tfts.setDigit(HOURS_TENS, value1 / 10, TFTs::force);    
+  tfts.setDigit(HOURS_ONES, value1 % 10, TFTs::force);
+  
+  tfts.current_graphic = 2; 
+  tfts.setDigit(MINUTES_TENS, value2 / 10, TFTs::force);
+  tfts.setDigit(MINUTES_ONES, value2 % 10, TFTs::force);
+  
+  tfts.current_graphic = 4;
+  tfts.setDigit(SECONDS_TENS, value3 / 10, TFTs::force);
+  tfts.setDigit(SECONDS_ONES, value3 % 10, TFTs::force);
+  
+    // show labels at the bottom
+    tfts.showTextLabel(label1, 0);
+    tfts.showTextLabel(label2, 2);
+    tfts.showTextLabel(label3, 4);
+  }
+  
+  else if(cmd_str.startsWith("CLOCK")){
+    // restore clock mode
+    clockState = 0;
+  }
+  
+  else if(cmd_str.startsWith("TXT: ")){
+    // show a custom text message on all the displays
+    String txt = cmd_str.substring(5);
+    //tfts.showLongTextSplitted(txt);
+    tfts.showLongText(txt.c_str());
+    clockState = 1; // no longer showing the clock
+  }
+  
+  else if(cmd_str.startsWith("BMP: ")){
+    // show a custom image on a single display
+    String base64Data = cmd_str.substring(5);
+    tfts.showCustomImage(base64Data);
+    clockState = 1; // no longer showing the clock
+  }
+  
+  else if(cmd_str.length() > EQUALIZER_STR_SIZE-1){
+      // draw the spectrogram from the string (format: "0123456789012 lrc line here" -> 12-bands spectrogram, value ranges: 0-9)
+
+      // render the spectrogram
+      String equalizer_str = cmd_str.substring(0, EQUALIZER_STR_SIZE);
+      tfts.showSpectrogram(equalizer_str.c_str());
+      
+      // draw a lrc line if present
+      static String old_lrc_line = "";
+      String lrc_line = cmd_str.substring(EQUALIZER_STR_SIZE);
+      if( lrc_line.length() > 1 && lrc_line != old_lrc_line ) {
+        old_lrc_line = lrc_line;
+        tfts.showLongText(old_lrc_line.c_str());  // redraw or update
+      }
+      
+      clockState = 1; // no longer showing the clock
+  }
+  // ignore other unsupported commands
+
+
+} //   handleSerialCommands
+
+
 void setupMenu() {
   #ifdef DEBUG_OUTPUT
     Serial.println("main::setupMenu!");
@@ -487,6 +604,10 @@ void updateClockDisplay(TFTs::show_t show) {
   #ifdef DEBUG_OUTPUT_VERBOSE
     Serial.println("main::updateClockDisplay!");
   #endif
+  if(clockState>0) {
+    // not in clock mode, return to avoid ovewriting
+    return;
+  }
   // refresh starting on seconds
   tfts.setDigit(SECONDS_ONES, uclock.getSecondsOnes(), show);
   tfts.setDigit(SECONDS_TENS, uclock.getSecondsTens(), show);
