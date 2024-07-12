@@ -73,6 +73,13 @@ void TFTs::showNoMqttStatus() {
   print("NO MQTT !");
 }
 
+uint16_t TFTs::ApplyColorDimming(uint16_t color) {
+    if (dimming < 255) { // only dim when needed
+      color = alphaBlend(dimming, color, TFT_BLACK);
+    }
+    return color;
+}
+  
 void TFTs::ChipSelectByNumber(int tft_no) {
     // tfts are numbered 0-5 from left to right
   if(tft_no==0) chip_select.setHoursTens();
@@ -102,9 +109,11 @@ void TFTs::showLongTextSplitted(String text) {
   for (int i = 0; i < text.length(); i += charsPerTft) {
       String splitted_line = text.substring(i, i + charsPerTft);
 
-      setTextColor(TFT_WHITE, TFT_BLACK);
-      setCursor(0, 0, 4);  // TODO: use a bigger font
+      setTextColor( ApplyColorDimming(TFT_WHITE) );
+      setCursor(0, 0, 4);
+      setTextSize(2); // double size
       print(splitted_line);
+      setTextSize(1);  // reset to 1
 
       tft_no += 1;
       if(tft_no>=6) break;
@@ -125,9 +134,12 @@ void TFTs::showLongText(const char* text) {
   for(int i=0 ; i<6 ; i++) {
       ChipSelectByNumber(i);
       fillRect(0, 0, TFT_WIDTH, TFT_HEIGHT/2, TFT_BLACK); // clear top half screens
-      setTextColor(TFT_WHITE, TFT_BLACK);
+      setTextSize(2); // double size
+      //setTextColor(TFT_WHITE, TFT_BLACK);
+      setTextColor( ApplyColorDimming(TFT_WHITE) );
       setCursor(0, 0, 4);
       print(text);
+      setTextSize(1);  // reset to 1
   }
 }
 
@@ -195,7 +207,9 @@ void TFTs::showSpectrogram(const char* equalizer_str) {
     Serial.print(",");
     Serial.println(tft_no);
 #endif
-          
+          //uint16_t color = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | ((b & 0xFF) >> 3);
+          color = ApplyColorDimming(color);
+    
           // void TFT_eSPI::fillRect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color)  
           fillRect((bars_in_curr_tft * BARS_WIDTH), (TFT_HEIGHT - BARS_HEIGHT_UNIT * cur_v), BARS_WIDTH, BARS_HEIGHT_UNIT * cur_v, color);
           

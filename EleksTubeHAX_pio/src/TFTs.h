@@ -71,6 +71,7 @@ private:
   uint16_t read16(fs::File &f);
   uint32_t read32(fs::File &f);
   void ChipSelectByNumber(int tft_no);
+  uint16_t ApplyColorDimming(uint16_t color);
 
   static uint16_t UnpackedImageBuffer[TFT_HEIGHT][TFT_WIDTH];
   uint8_t FileInBuffer=255; // invalid, always load first image
