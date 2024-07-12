@@ -26,7 +26,7 @@ public:
   // A digit of 0xFF means blank the screen.
   const static uint8_t blanked = 255;
 
-  uint8_t dimming = 255; // amount of dimming graphics
+  uint8_t dimming = 100; // amount of dimming graphics
   uint8_t current_graphic = 1;
   
   void begin();

@@ -464,7 +464,7 @@ void handleSerialCommands() {
     int value1 = 0;
     int value2 = 0;
     int value3 = 0;
-    int r = sscanf(cmd_str.c_str(), "SENSORS: %9[^:]: %d, %9[^:]: %d, %9[^:]: %d", label1, &value1, label2, &value2, label3, &value3);
+    int r = sscanf(cmd_str.c_str(), "SENSORS: %9[^=]=%d, %9[^=]=%d, %9[^=]=%d", label1, &value1, label2, &value2, label3, &value3);
     // TODO: check r == 6
   #ifdef DEBUG_OUTPUT
     Serial.println("parsed sensors data:");
@@ -577,7 +577,7 @@ void checkOnEveryFullHour(bool loopUpdate) {
       }
     } else {
       Serial.println("Setting daytime mode (normal brightness)");
-      tfts.dimming = 255; // 0..255
+      tfts.dimming = 100; // 0..255
       tfts.InvalidateImageInBuffer(); // invalidate; reload images with new dimming value
       backlights.dimming = false;
       if (menu.getState() == Menu::idle || !loopUpdate) { // otherwise erases the menu
