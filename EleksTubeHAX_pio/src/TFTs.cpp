@@ -134,12 +134,12 @@ void TFTs::showLongText(const char* text) {
   for(int i=0 ; i<6 ; i++) {
       ChipSelectByNumber(i);
       fillRect(0, 0, TFT_WIDTH, TFT_HEIGHT/2, TFT_BLACK); // clear top half screens
-      setTextSize(2); // double size
+      //setTextSize(2); // double size
       //setTextColor(TFT_WHITE, TFT_BLACK);
       setTextColor( ApplyColorDimming(TFT_WHITE) );
       setCursor(0, 0, 4);
       print(text);
-      setTextSize(1);  // reset to 1
+      //setTextSize(1);  // reset to 1
   }
 }
 
@@ -227,41 +227,180 @@ void TFTs::showSpectrogram(const char* equalizer_str) {
     } //end for
 }
 
+class MemoryFile : public fs::File {
+  public:
+      MemoryFile(const char* buffer, size_t size)
+          : buffer_(buffer), size_(size), pos_(0) {}
 
-void TFTs::showCustomImage(String base64Data) {
+      size_t read(uint8_t* outBuffer, size_t bytesToRead) {
+          if (pos_ + bytesToRead > size_) {
+              bytesToRead = size_ - pos_;
+          }
+          memcpy(outBuffer, buffer_ + pos_, bytesToRead);
+          pos_ += bytesToRead;
+          return bytesToRead;
+      }
 
-  /* WIP:
-  // Decode Base64 data
-  size_t outputLength;
-  unsigned char* decodedData = base64_decode(base64Data.c_str(), base64Data.length(), &outputLength);
-  */
-  uint8_t* decodedData = (uint8_t*) base64Data.c_str();
+      void seek(size_t pos) {
+          if (pos > size_) {
+              throw std::out_of_range("Seek position is out of range");
+          }
+          pos_ = pos;
+      }
 
-  // BMP header is 54 bytes
-  int bmpOffset = 54;
-  int bmpWidth = decodedData[18] + (decodedData[19] << 8); // BMP width
-  int bmpHeight = decodedData[22] + (decodedData[23] << 8); // BMP height
-  int colorsUsed = decodedData[46] + (decodedData[47] << 8); // Number of colors used
-
- for(int i=0 ; i<6 ; i++) {
-      ChipSelectByNumber(i);
-      fillRect(0, 0, TFT_WIDTH, TFT_HEIGHT, TFT_BLACK); // clear screen
-
-      // Display image
-      setAddrWindow(0, 0, bmpWidth - 1, bmpHeight - 1);
+      size_t tell() const {
+          return pos_;
+      }
       
-      // Palette starts right after the header
-      int paletteOffset = bmpOffset;
+      void close() {}
+      
+  private:
+      const char* buffer_;
+      size_t size_;
+      size_t pos_;
+};
 
-      // Adjust the start of pixel data to account for the palette
-      int pixelsOffset = paletteOffset + colorsUsed * 4;
 
-      // Display image
-      pushColors(&decodedData[pixelsOffset], bmpWidth * bmpHeight);
-      //pushImage(0,0, TFT_WIDTH, TFT_HEIGHT, (uint16_t *)UnpackedImageBuffer);
+//#include <base64.h> // encode only
+#include "mbedtls/base64.h"  // encode+decode
+
+// WIP:
+void TFTs::showCustomImage(String base64Data) {
+  
+  // Decode Base64 data*/
+  /*
+  size_t outputLength;
+  const char* decodedData = base64_decode(base64Data.c_str(), base64Data.length(), &outputLength);
+  * */
+  
+  // check size
+  size_t outputLength;
+  // mbedtls_base64_decode(unsigned char *dst, size_t dlen, size_t *olen, const unsigned char *src, size_t slen);
+  if(mbedtls_base64_decode(NULL, 0, &outputLength, (const unsigned char*) base64Data.c_str(), base64Data.length())) {
+    // non-zero exit code = error
+    Serial.println("invalid base64 string received");
+    return;
+  }
+#ifdef DEBUG_OUTPUT_VERBOSE
+    Serial.print("base64 outputLength");
+    Serial.println(outputLength);
+#endif
+  unsigned char* decodedData = (unsigned char*) malloc(outputLength);
+  mbedtls_base64_decode(decodedData, outputLength, &outputLength, (const unsigned char*) base64Data.c_str(), base64Data.length());
+  
+  //MemoryFile bmpFS = MemoryFile(base64Data.c_str(), base64Data.length());
+  MemoryFile bmpFS = MemoryFile((const char*) decodedData, outputLength);
+
+  uint32_t seekOffset, headerSize, paletteSize = 0;
+  int16_t w, h, row, col;
+  uint16_t  r, g, b, bitDepth;
+
+  // black background - clear whole buffer
+  memset(UnpackedImageBuffer, '\0', sizeof(UnpackedImageBuffer));
+  
+  uint16_t magic = read16(bmpFS);
+  
+  if (magic != 0x4D42) {
+    Serial.print("Invalid image header");
+    Serial.println(magic);
+    bmpFS.close();
+    return;
   }
 
+  read32(bmpFS); // filesize in bytes
+  read32(bmpFS); // reserved
+  seekOffset = read32(bmpFS); // start of bitmap
+  headerSize = read32(bmpFS); // header size
+  w = read32(bmpFS); // width
+  h = read32(bmpFS); // height
+  read16(bmpFS); // color planes (must be 1)
+  bitDepth = read16(bmpFS);
+
+  // center image on the display
+  int16_t x = (TFT_WIDTH - w) / 2;
+  int16_t y = (TFT_HEIGHT - h) / 2;
+  
+#ifdef DEBUG_OUTPUT_VERBOSE
+  Serial.print(" image W, H, BPP: ");
+  Serial.print(w); 
+  Serial.print(", "); 
+  Serial.print(h);
+  Serial.print(", "); 
+  Serial.println(bitDepth);
+  Serial.print(" dimming: ");
+  Serial.println(dimming);
+  Serial.print(" offset x, y: ");
+  Serial.print(x); 
+  Serial.print(", "); 
+  Serial.println(y);
+#endif
+  if (read32(bmpFS) != 0 || (bitDepth != 24 && bitDepth != 1 && bitDepth != 4 && bitDepth != 8)) {
+    Serial.println("BMP format not recognized.");
+    //bmpFS.close();
+    return;
+  }
+
+  uint32_t palette[256];
+  if (bitDepth <= 8) // 1,4,8 bit bitmap: read color palette
+  {
+    read32(bmpFS); read32(bmpFS); read32(bmpFS); // size, w resolution, h resolution
+    paletteSize = read32(bmpFS);
+    if (paletteSize == 0) paletteSize = bitDepth * bitDepth; // if 0, size is 2^bitDepth
+    bmpFS.seek(14 + headerSize); // start of color palette
+    for (uint16_t i = 0; i < paletteSize; i++) {
+      palette[i] = read32(bmpFS);
+    }
+  }
+
+  bmpFS.seek(seekOffset);
+
+  uint32_t lineSize = ((bitDepth * w +31) >> 5) * 4;
+  uint8_t lineBuffer[lineSize];
+  
+  // row is decremented as the BMP image is drawn bottom up
+  for (row = h-1; row >= 0; row--) {
+    bmpFS.read(lineBuffer, sizeof(lineBuffer));
+    uint8_t*  bptr = lineBuffer;
+    
+    // Convert 24 to 16 bit colours while copying to output buffer.
+    for (col = 0; col < w; col++) {
+      if (bitDepth == 24) {
+          b = *bptr++;
+          g = *bptr++;
+          r = *bptr++;
+        } else {
+          uint32_t c = 0;
+          if (bitDepth == 8) {
+            c = palette[*bptr++];
+          }
+          else if (bitDepth == 4) {
+            c = palette[(*bptr >> ((col & 0x01)?0:4)) & 0x0F];
+            if (col & 0x01) bptr++;
+          }
+          else { // bitDepth == 1
+            c = palette[(*bptr >> (7 - (col & 0x07))) & 0x01];
+            if ((col & 0x07) == 0x07) bptr++;
+          }
+          b = c; g = c >> 8; r = c >> 16;
+        }
+
+        uint16_t color = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | ((b & 0xFF) >> 3);
+        if (dimming < 255) { // only dim when needed
+          color = alphaBlend(dimming, color, TFT_BLACK);
+        } // dimming
+
+        UnpackedImageBuffer[row+y][col+x] = color;
+    } // col
+  } // row
+  FileInBuffer = 255;
+  
+  bool oldSwapBytes = getSwapBytes();
+  setSwapBytes(true);
+  pushImage(0,0, TFT_WIDTH, TFT_HEIGHT, (uint16_t *)UnpackedImageBuffer);
+  setSwapBytes(oldSwapBytes);
+    
 }
+
 
 void TFTs::enableAllDisplays() {
   #ifdef DEBUG_OUTPUT_TFT
