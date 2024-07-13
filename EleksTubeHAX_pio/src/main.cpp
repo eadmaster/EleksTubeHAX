@@ -441,6 +441,7 @@ void handleMQTTCommands() {
 int clockState = 0;  // 0=clock mode, !0 -> PC controlled mode
 const int MIN_CMD_LEN = 8;
 const byte EQUALIZER_STR_SIZE = 11;  // TODO: detect variable lenght
+const byte MIN_BASE64_IMG_SIZE = 16;
 
 void handleSerialCommands() {
   String cmd_str;
@@ -478,18 +479,18 @@ void handleSerialCommands() {
   
     clockState = 1; // no longer showing the clock
 
-  tfts.current_graphic = 1; 
-  tfts.setDigit(HOURS_TENS, value1 / 10, TFTs::force);    
-  tfts.setDigit(HOURS_ONES, value1 % 10, TFTs::force);
-  
-  tfts.current_graphic = 2; 
-  tfts.setDigit(MINUTES_TENS, value2 / 10, TFTs::force);
-  tfts.setDigit(MINUTES_ONES, value2 % 10, TFTs::force);
-  
-  tfts.current_graphic = 4;
-  tfts.setDigit(SECONDS_TENS, value3 / 10, TFTs::force);
-  tfts.setDigit(SECONDS_ONES, value3 % 10, TFTs::force);
-  
+    tfts.current_graphic = 1;  // TODO: customizable
+    tfts.setDigit(HOURS_TENS, value1 / 10, TFTs::force);    
+    tfts.setDigit(HOURS_ONES, value1 % 10, TFTs::force);
+    
+    tfts.current_graphic = 2;   // TODO: customizable
+    tfts.setDigit(MINUTES_TENS, value2 / 10, TFTs::force);
+    tfts.setDigit(MINUTES_ONES, value2 % 10, TFTs::force);
+    
+    tfts.current_graphic = 4;  // TODO: customizable
+    tfts.setDigit(SECONDS_TENS, value3 / 10, TFTs::force);
+    tfts.setDigit(SECONDS_ONES, value3 % 10, TFTs::force);
+    
     // show labels at the bottom
     tfts.showTextLabel(label1, 0);
     tfts.showTextLabel(label2, 2);
@@ -505,14 +506,14 @@ void handleSerialCommands() {
     // show a custom text message on all the displays
     String txt = cmd_str.substring(5);
     //tfts.showLongTextSplitted(txt);
-    tfts.showLongText(txt.c_str());
+    tfts.showLongTextAlternated(txt.c_str() + 5);
+    //tfts.showLongText(txt.c_str());
     clockState = 1; // no longer showing the clock
   }
   
-  else if(cmd_str.startsWith("BMP: ")){
+  else if(cmd_str.startsWith("BMP: ") && cmd_str.length() > MIN_BASE64_IMG_SIZE){
     // show a custom image on a single display
-    String base64Data = cmd_str.substring(5);
-    tfts.showCustomImage(base64Data);
+    tfts.showCustomImage(cmd_str.c_str() + 5);
     clockState = 1; // no longer showing the clock
   }
   
@@ -522,13 +523,15 @@ void handleSerialCommands() {
       // render the spectrogram
       String equalizer_str = cmd_str.substring(0, EQUALIZER_STR_SIZE);
       tfts.showSpectrogram(equalizer_str.c_str());
+      // TODO: also change the backlights colors via values averanging
+      //backlights...
       
       // draw a lrc line if present
       static String old_lrc_line = "";
       String lrc_line = cmd_str.substring(EQUALIZER_STR_SIZE);
       if( lrc_line.length() > 1 && lrc_line != old_lrc_line ) {
         old_lrc_line = lrc_line;
-        tfts.showLongText(old_lrc_line.c_str());  // redraw or update
+        tfts.showLongTextAlternated(old_lrc_line.c_str());  // redraw or update
       }
       
       clockState = 1; // no longer showing the clock
@@ -550,6 +553,8 @@ void setupMenu() {
 }
 
 bool isNightTime(uint8_t current_hour) {
+    return false;
+    /*
     if (DAY_TIME < NIGHT_TIME) {
       // "Night" spans across midnight
       return (current_hour < DAY_TIME) || (current_hour >= NIGHT_TIME);
@@ -557,7 +562,7 @@ bool isNightTime(uint8_t current_hour) {
     else {
       // "Night" starts after midnight, entirely contained within the day
       return (current_hour >= NIGHT_TIME) && (current_hour < DAY_TIME);  
-    }
+    }*/
 }
 
 void checkOnEveryFullHour(bool loopUpdate) {

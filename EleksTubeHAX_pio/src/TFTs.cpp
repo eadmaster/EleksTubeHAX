@@ -97,7 +97,6 @@ void TFTs::showTextLabel(const char* text, int tft_no) {
   print(text);
 }
 
-// WIP:
 void TFTs::showLongTextSplitted(String text) {
 
   byte tft_no = 0;
@@ -110,7 +109,7 @@ void TFTs::showLongTextSplitted(String text) {
       String splitted_line = text.substring(i, i + charsPerTft);
 
       setTextColor( ApplyColorDimming(TFT_WHITE) );
-      setCursor(0, 0, 4);
+      setCursor(0, 0, 4);  // TODO: centered
       setTextSize(2); // double size
       print(splitted_line);
       setTextSize(1);  // reset to 1
@@ -126,6 +125,20 @@ void TFTs::showLongTextSplitted(String text) {
 #endif
   }
 }
+
+void TFTs::showLongTextAlternated(const char* text) {
+  static int last_used_tft = 0;
+  ChipSelectByNumber(last_used_tft);
+  
+  fillRect(0, 0, TFT_WIDTH, TFT_HEIGHT/2, TFT_BLACK); // clear top half screens
+  setTextColor( ApplyColorDimming(TFT_WHITE) );
+  setCursor(0, 0, 4);
+  print(text);
+  
+  last_used_tft += 1;
+  if(last_used_tft>=6) last_used_tft = 0; // reset
+}
+
 
 
 void TFTs::showLongText(const char* text) {
@@ -264,19 +277,18 @@ class MemoryFile : public fs::File {
 //#include <base64.h> // encode only
 #include "mbedtls/base64.h"  // encode+decode
 
-// WIP:
-void TFTs::showCustomImage(String base64Data) {
+void TFTs::showCustomImage(const char* base64Data) {
   
   // Decode Base64 data*/
   /*
   size_t outputLength;
   const char* decodedData = base64_decode(base64Data.c_str(), base64Data.length(), &outputLength);
-  * */
-  
+  * */  
+
   // check size
   size_t outputLength;
   // mbedtls_base64_decode(unsigned char *dst, size_t dlen, size_t *olen, const unsigned char *src, size_t slen);
-  if(mbedtls_base64_decode(NULL, 0, &outputLength, (const unsigned char*) base64Data.c_str(), base64Data.length())) {
+  if(mbedtls_base64_decode(NULL, 0, &outputLength, (const unsigned char*) base64Data, strlen(base64Data))) {
     // non-zero exit code = error
     Serial.println("invalid base64 string received");
     return;
@@ -286,8 +298,8 @@ void TFTs::showCustomImage(String base64Data) {
     Serial.println(outputLength);
 #endif
   unsigned char* decodedData = (unsigned char*) malloc(outputLength);
-  mbedtls_base64_decode(decodedData, outputLength, &outputLength, (const unsigned char*) base64Data.c_str(), base64Data.length());
-  
+  mbedtls_base64_decode(decodedData, outputLength, &outputLength, (const unsigned char*) base64Data, strlen(base64Data));
+
   //MemoryFile bmpFS = MemoryFile(base64Data.c_str(), base64Data.length());
   MemoryFile bmpFS = MemoryFile((const char*) decodedData, outputLength);
 
@@ -304,6 +316,7 @@ void TFTs::showCustomImage(String base64Data) {
     Serial.print("Invalid image header");
     Serial.println(magic);
     bmpFS.close();
+    free(decodedData);  
     return;
   }
 
@@ -336,7 +349,8 @@ void TFTs::showCustomImage(String base64Data) {
 #endif
   if (read32(bmpFS) != 0 || (bitDepth != 24 && bitDepth != 1 && bitDepth != 4 && bitDepth != 8)) {
     Serial.println("BMP format not recognized.");
-    //bmpFS.close();
+    bmpFS.close();
+    free(decodedData);  
     return;
   }
 
@@ -398,7 +412,8 @@ void TFTs::showCustomImage(String base64Data) {
   setSwapBytes(true);
   pushImage(0,0, TFT_WIDTH, TFT_HEIGHT, (uint16_t *)UnpackedImageBuffer);
   setSwapBytes(oldSwapBytes);
-    
+  
+  free(decodedData);  
 }
 
 

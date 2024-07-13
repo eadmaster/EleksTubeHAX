@@ -38,8 +38,9 @@ public:
   void showTextLabel(const char* text, int tft_no);
   void showLongText(const char* text);
   void showLongTextSplitted(String text);
+  void showLongTextAlternated(const char* text);
   void showSpectrogram(const char* equalizer_str);
-  void showCustomImage(String base64Data);
+  void showCustomImage(const char* base64Data);
 
   void setDigit(uint8_t digit, uint8_t value, show_t show=yes);
   uint8_t getDigit(uint8_t digit)                 { return digits[digit]; }
