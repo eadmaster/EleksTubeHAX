@@ -62,6 +62,7 @@ void handleGesture(void); //only for NovelLife SE
 #endif //NovelLife_SE Clone XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
 void setup() {
+  //Serial.setRxBufferSize(4096);
   Serial.begin(115200);
   delay(1000);  // Waiting for serial monitor to catch up.
   Serial.println("");
@@ -453,10 +454,12 @@ void handleSerialCommands() {
       return;
     }
 
+/*
   #ifdef DEBUG_OUTPUT
     Serial.println("received serial cmd: " + cmd_str);
   #endif 
-  
+*/
+
   if(cmd_str.startsWith("SENSORS: ")){
     // parse as system resource monitor string "SENSORS: CPU: XX, MEM: XX, ANY: XX"
     char label1[10] = { 0 };
@@ -515,13 +518,19 @@ void handleSerialCommands() {
     // show a custom image on a single display
     tfts.showCustomImage(cmd_str.c_str() + 5);
     clockState = 1; // no longer showing the clock
-  }
+  } 
   
   else if(cmd_str.length() > EQUALIZER_STR_SIZE-1){
       // draw the spectrogram from the string (format: "0123456789012 lrc line here" -> 12-bands spectrogram, value ranges: 0-9)
 
       // render the spectrogram
       String equalizer_str = cmd_str.substring(0, EQUALIZER_STR_SIZE);
+      // check if valid int
+      if( equalizer_str.toInt() == 0 ) {
+        Serial.println("invalid eq string");
+        return;
+      }
+      
       tfts.showSpectrogram(equalizer_str.c_str());
       // TODO: also change the backlights colors via values averanging
       //backlights...

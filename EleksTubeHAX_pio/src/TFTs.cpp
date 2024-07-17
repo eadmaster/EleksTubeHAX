@@ -245,6 +245,11 @@ class MemoryFile : public fs::File {
       MemoryFile(const char* buffer, size_t size)
           : buffer_(buffer), size_(size), pos_(0) {}
 
+      int read() {  // read a single byte
+        pos_ += 1;
+        return *(buffer_ + pos_ - 1);
+       }
+       
       size_t read(uint8_t* outBuffer, size_t bytesToRead) {
           if (pos_ + bytesToRead > size_) {
               bytesToRead = size_ - pos_;
@@ -274,33 +279,37 @@ class MemoryFile : public fs::File {
 };
 
 
-//#include <base64.h> // encode only
-#include "mbedtls/base64.h"  // encode+decode
+#include "libb64/cdecode.h"
+
+
+void SerialPrintHexString(uint64_t val) {
+  char s[18] = {0};
+  //snprintf(s, 10, "%x", val);
+  //snprintf(s, sizeof(s), "%" PRIx64, val);
+  snprintf(s, sizeof(s), "%llx", val);
+  Serial.println(s);
+}
+
 
 void TFTs::showCustomImage(const char* base64Data) {
   
   // Decode Base64 data*/
-  /*
-  size_t outputLength;
-  const char* decodedData = base64_decode(base64Data.c_str(), base64Data.length(), &outputLength);
-  * */  
 
-  // check size
-  size_t outputLength;
-  // mbedtls_base64_decode(unsigned char *dst, size_t dlen, size_t *olen, const unsigned char *src, size_t slen);
-  if(mbedtls_base64_decode(NULL, 0, &outputLength, (const unsigned char*) base64Data, strlen(base64Data))) {
-    // non-zero exit code = error
-    Serial.println("invalid base64 string received");
+  int outputLength = base64_decode_expected_len(strlen(base64Data));
+
+  char* decodedData = (char*) malloc(outputLength+2);
+  if(!decodedData) {
+    Serial.println("insufficient memory to decode bmp image");
     return;
   }
+  int declen = base64_decode_chars(base64Data, strlen(base64Data), decodedData);
 #ifdef DEBUG_OUTPUT_VERBOSE
     Serial.print("base64 outputLength");
     Serial.println(outputLength);
+    Serial.print("base64 decoded");
+    Serial.println(declen);
 #endif
-  unsigned char* decodedData = (unsigned char*) malloc(outputLength);
-  mbedtls_base64_decode(decodedData, outputLength, &outputLength, (const unsigned char*) base64Data, strlen(base64Data));
-
-  //MemoryFile bmpFS = MemoryFile(base64Data.c_str(), base64Data.length());
+  
   MemoryFile bmpFS = MemoryFile((const char*) decodedData, outputLength);
 
   uint32_t seekOffset, headerSize, paletteSize = 0;
@@ -311,11 +320,13 @@ void TFTs::showCustomImage(const char* base64Data) {
   memset(UnpackedImageBuffer, '\0', sizeof(UnpackedImageBuffer));
   
   uint16_t magic = read16(bmpFS);
-  
+
   if (magic != 0x4D42) {
-    Serial.print("Invalid image header");
-    Serial.println(magic);
-    bmpFS.close();
+    Serial.print("Invalid BMP image header: ");
+    SerialPrintHexString(magic);
+    Serial.println(decodedData[0]);
+    Serial.println(decodedData[1]);
+    //bmpFS.close();
     free(decodedData);  
     return;
   }
@@ -406,14 +417,19 @@ void TFTs::showCustomImage(const char* base64Data) {
         UnpackedImageBuffer[row+y][col+x] = color;
     } // col
   } // row
-  FileInBuffer = 255;
-  
-  bool oldSwapBytes = getSwapBytes();
-  setSwapBytes(true);
-  pushImage(0,0, TFT_WIDTH, TFT_HEIGHT, (uint16_t *)UnpackedImageBuffer);
-  setSwapBytes(oldSwapBytes);
   
   free(decodedData);  
+  
+  FileInBuffer = 255;
+  
+  // show the img on all TFTs
+  for(int i=0 ; i<6 ; i++) {
+      ChipSelectByNumber(i);      
+      bool oldSwapBytes = getSwapBytes();
+      setSwapBytes(true);
+      pushImage(0,0, TFT_WIDTH, TFT_HEIGHT, (uint16_t *)UnpackedImageBuffer);
+      setSwapBytes(oldSwapBytes);
+  }
 }
 
 
