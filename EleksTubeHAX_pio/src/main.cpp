@@ -61,6 +61,28 @@ void gestureInterruptRoutine(void); //only for NovelLife SE
 void handleGesture(void); //only for NovelLife SE
 #endif //NovelLife_SE Clone XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
+int clockState = 0;  // 0=clock mode, !0 -> serial/PC controlled mode
+// portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
+
+#include "esp_timer.h"
+const int SERIAL_INACTIVITY_TIMER=60;  // 60 seconds
+esp_timer_handle_t serialInactivityTimer;
+static void serialInactivityTimerCallback(void* arg) {
+  // restore clock state
+  // TODO: need to take a lock?
+  // portENTER_CRITICAL_ISR(&timerMux);
+  Serial.println("timer callback");
+  clockState = -1;  // full redraw needed
+  // portEXIT_CRITICAL_ISR(&timerMux);
+}
+void serialInactivityTimerRestart() {
+  if(esp_timer_is_active(serialInactivityTimer)) {
+    esp_timer_stop(serialInactivityTimer);
+  }
+  // else
+  esp_timer_start_once(serialInactivityTimer, 1000000 * SERIAL_INACTIVITY_TIMER);
+}
+
 void setup() {
   //Serial.setRxBufferSize(4096);
   Serial.begin(115200);
@@ -68,7 +90,12 @@ void setup() {
   Serial.println("");
   Serial.println(FIRMWARE_VERSION);
   Serial.println("In setup().");
-
+  
+  // setup inactivity timer
+	esp_timer_create_args_t my_timer_args = {}; /* All the fields are zero-initialized */
+	my_timer_args.callback = &serialInactivityTimerCallback;
+  esp_timer_create(&my_timer_args, &serialInactivityTimer);
+  
   stored_config.begin();
   stored_config.load();
 
@@ -439,9 +466,8 @@ void handleMQTTCommands() {
 } //HandleMQTTCommands
 
 
-int clockState = 0;  // 0=clock mode, !0 -> PC controlled mode
 const int MIN_CMD_LEN = 8;
-const byte EQUALIZER_STR_SIZE = 11;  // TODO: detect variable lenght
+const byte EQUALIZER_STR_MIN_SIZE = 11;
 const byte MIN_BASE64_IMG_SIZE = 16;
 
 void handleSerialCommands() {
@@ -480,8 +506,6 @@ void handleSerialCommands() {
     Serial.println(value3);
   #endif 
   
-    clockState = 1; // no longer showing the clock
-
     tfts.current_graphic = 1;  // TODO: customizable
     tfts.setDigit(HOURS_TENS, value1 / 10, TFTs::force);    
     tfts.setDigit(HOURS_ONES, value1 % 10, TFTs::force);
@@ -498,55 +522,79 @@ void handleSerialCommands() {
     tfts.showTextLabel(label1, 0);
     tfts.showTextLabel(label2, 2);
     tfts.showTextLabel(label3, 4);
+    
+    clockState = 1; // no longer showing the clock
+    serialInactivityTimerRestart();
   }
   
   else if(cmd_str.startsWith("CLOCK")){
     // restore clock mode
     clockState = 0;
+    esp_timer_stop(serialInactivityTimer);
+    updateClockDisplay(TFTs::force);
   }
   
-  else if(cmd_str.startsWith("TXT: ")){
+  else if(cmd_str.startsWith("TXT: ")){  
     // show a custom text message on all the displays
     String txt = cmd_str.substring(5);
     //tfts.showLongTextSplitted(txt);
-    tfts.showLongTextAlternated(txt.c_str() + 5);
+    tfts.showLongTextAlternated(txt.c_str());
     //tfts.showLongText(txt.c_str());
+
     clockState = 1; // no longer showing the clock
+    serialInactivityTimerRestart();
+  }
+  
+  else if(cmd_str.startsWith("TXT2: ")){
+    // show a custom text message on all the displays
+    String txt = cmd_str.substring(6);
+    tfts.showLongTextSplitted(txt);
+    clockState = 1; // no longer showing the clock
+    serialInactivityTimerRestart();
   }
   
   else if(cmd_str.startsWith("BMP: ") && cmd_str.length() > MIN_BASE64_IMG_SIZE){
     // show a custom image on a single display
     tfts.showCustomImage(cmd_str.c_str() + 5);
     clockState = 1; // no longer showing the clock
+    serialInactivityTimerRestart();
   } 
   
-  else if(cmd_str.length() > EQUALIZER_STR_SIZE-1){
+  else if(cmd_str.length() > EQUALIZER_STR_MIN_SIZE-1){
       // draw the spectrogram from the string (format: "0123456789012 lrc line here" -> 12-bands spectrogram, value ranges: 0-9)
 
       // render the spectrogram
-      String equalizer_str = cmd_str.substring(0, EQUALIZER_STR_SIZE);
+      String equalizer_str = cmd_str.substring(0, EQUALIZER_STR_MIN_SIZE);  // TODO: detect variable lenght
       // check if valid int
       if( equalizer_str.toInt() == 0 ) {
         Serial.println("invalid eq string");
         return;
       }
       
-      tfts.showSpectrogram(equalizer_str.c_str());
+      tfts.showSpectrogram(equalizer_str.c_str()+1); // cut 1st char
+      
       // TODO: also change the backlights colors via values averanging
-      //backlights...
+      // https://github.com/adafruit/Adafruit_NeoPixel
+      /*
+      for (uint8_t digit=0; digit < NUM_DIGITS; digit++) {
+        backlights.setPixelColor(i, pixels.Color(0, 150, 0));
+      }
+      backlights.show();
+      * */
       
       // draw a lrc line if present
       static String old_lrc_line = "";
-      String lrc_line = cmd_str.substring(EQUALIZER_STR_SIZE);
+      String lrc_line = cmd_str.substring(EQUALIZER_STR_MIN_SIZE);
       if( lrc_line.length() > 1 && lrc_line != old_lrc_line ) {
         old_lrc_line = lrc_line;
-        tfts.showLongTextAlternated(old_lrc_line.c_str());  // redraw or update
+        tfts.showLongTextAlternated(old_lrc_line.c_str(), 2, 5);  // redraw or update
+        //tfts.showLongTextSplitted(old_lrc_line.c_str());
       }
       
       clockState = 1; // no longer showing the clock
+      serialInactivityTimerRestart();
   }
   // ignore other unsupported commands
-
 
 } //   handleSerialCommands
 
@@ -621,7 +669,12 @@ void updateClockDisplay(TFTs::show_t show) {
   if(clockState>0) {
     // not in clock mode, return to avoid ovewriting
     return;
+  } else if(clockState==-1) {
+    // forced redraw set by serialInactivityTimerCallback
+    show = TFTs::force;
+    clockState=0;
   }
+  
   // refresh starting on seconds
   tfts.setDigit(SECONDS_ONES, uclock.getSecondsOnes(), show);
   tfts.setDigit(SECONDS_TENS, uclock.getSecondsTens(), show);

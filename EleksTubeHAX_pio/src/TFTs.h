@@ -38,7 +38,7 @@ public:
   void showTextLabel(const char* text, int tft_no);
   void showLongText(const char* text);
   void showLongTextSplitted(String text);
-  void showLongTextAlternated(const char* text);
+  void showLongTextAlternated(const char* text, const int START_TFT=0, const int LAST_TFT=6);
   void showSpectrogram(const char* equalizer_str);
   void showCustomImage(const char* base64Data);
 

@@ -100,43 +100,52 @@ void TFTs::showTextLabel(const char* text, int tft_no) {
 void TFTs::showLongTextSplitted(String text) {
 
   byte tft_no = 0;
-  ChipSelectByNumber(tft_no);
-
-  int charsPerTft = text.length() / 6;
+  //int charsPerTft = text.length() / 6;
+  const int MAX_CHARS_PER_TFT = 10;
+  int chars_split = MAX_CHARS_PER_TFT;
+  int lineno = 0;
+  const int TEXT_SIZE_MULT = 2;
+  const int FONT_HEIGHT = 26;
 
   // Split the text into lines
-  for (int i = 0; i < text.length(); i += charsPerTft) {
-      String splitted_line = text.substring(i, i + charsPerTft);
+  for (int i = 0; i < text.length(); i += chars_split) {
+      ChipSelectByNumber(tft_no);
+      if(lineno==0) fillRect(0, 0, TFT_WIDTH, TFT_HEIGHT/2, TFT_BLACK); // clear top half screens
+      
+      chars_split = MAX_CHARS_PER_TFT; // reset
+      String splitted_line = text.substring(i, i + MAX_CHARS_PER_TFT);
+      while(textWidth(splitted_line.c_str(), 4)*TEXT_SIZE_MULT > TFT_WIDTH) {
+        // reduce by 1 char and recheck
+        chars_split -= 1;
+        splitted_line = text.substring(i, i + chars_split);
+      }
 
       setTextColor( ApplyColorDimming(TFT_WHITE) );
-      setCursor(0, 0, 4);  // TODO: centered
-      setTextSize(2); // double size
+      setCursor(0, lineno*FONT_HEIGHT*TEXT_SIZE_MULT, 4);  // TODO: centered
+      setTextSize(TEXT_SIZE_MULT); // incr. size
       print(splitted_line);
       setTextSize(1);  // reset to 1
 
       tft_no += 1;
-      if(tft_no>=6) break;
-      ChipSelectByNumber(tft_no);
-
-#ifdef DEBUG_OUTPUT
-    Serial.print(splitted_line);
-    Serial.print(",");
-    Serial.print(charsPerTft);
-#endif
+      if(tft_no>=6) {
+        lineno+= 1;
+        tft_no = 0;  // reset
+      }
   }
 }
 
-void TFTs::showLongTextAlternated(const char* text) {
-  static int last_used_tft = 0;
+void TFTs::showLongTextAlternated(const char* text, const int START_TFT, const int LAST_TFT) {
+  static int last_used_tft = START_TFT;
   ChipSelectByNumber(last_used_tft);
   
   fillRect(0, 0, TFT_WIDTH, TFT_HEIGHT/2, TFT_BLACK); // clear top half screens
   setTextColor( ApplyColorDimming(TFT_WHITE) );
+  //setTextSize(2); // incr. size
   setCursor(0, 0, 4);
   print(text);
   
   last_used_tft += 1;
-  if(last_used_tft>=6) last_used_tft = 0; // reset
+  if(last_used_tft>=LAST_TFT) last_used_tft = START_TFT; // reset
 }
 
 
@@ -156,7 +165,7 @@ void TFTs::showLongText(const char* text) {
   }
 }
 
-void TFTs::showSpectrogram(const char* equalizer_str) {
+void TFTs::showSpectrogram(const char* equalizer_str) {  // TODO: , const char* old_equalizer_str -> reduce draws
     byte i = 0;
     char cur_c = ' ';
     byte cur_v = 0;
@@ -164,17 +173,27 @@ void TFTs::showSpectrogram(const char* equalizer_str) {
     byte g=0;
     byte b=1;
     uint32_t color;
+    int16_t x, y, w, h;
     
+#define SPECTROGRAM_ON_TFT_1_AND_2_ONLY
+#ifdef SPECTROGRAM_ON_TFT_1_AND_2_ONLY
+    // faster
+    const byte BARS_PER_TFT = strlen(equalizer_str) / 2;
+    const byte BARS_WIDTH_SPACING = 2;
+#else
     //const byte BARS_PER_TFT = strlen(equalizer_str) / 6;
     const byte BARS_PER_TFT = 2;
-    const byte BARS_WIDTH = TFT_WIDTH / BARS_PER_TFT;
+    const byte BARS_WIDTH_SPACING = 10;
+#endif
     const byte BARS_HEIGHT_UNIT = TFT_HEIGHT / 20;
+    const byte BARS_WIDTH = TFT_WIDTH / BARS_PER_TFT;
     byte bars_in_curr_tft = 0;
     byte tft_no = 0;
     ChipSelectByNumber(tft_no);
     //fillScreen(TFT_BLACK); // clear the screen
     fillRect(0, TFT_HEIGHT/2, TFT_WIDTH, TFT_HEIGHT/2, TFT_BLACK); // only half
 
+/*
 #ifdef DEBUG_OUTPUT
     Serial.print(equalizer_str);
     Serial.print(",");
@@ -184,33 +203,34 @@ void TFTs::showSpectrogram(const char* equalizer_str) {
     Serial.print(",");
     Serial.println(BARS_HEIGHT_UNIT);
 #endif
+*/
 
     for (int i = 0; i < strlen(equalizer_str); i++) {
         cur_c = equalizer_str[i];
-        if(cur_c >= '0' && cur_c <= '9') { // check if it is a valid int
-          cur_v = (byte)(cur_c - '0');
-          // change color according to value
-          if(cur_v==0) {
-            r=0; g=0; b=0;  // balck
-            color = TFT_BLACK;
-          } else if(cur_v>=7) {
-            r=1; g=0; b=0;  // red
-            color = TFT_RED;
-          } else if(cur_v>=5) {
-            r=1; g=1; b=0;  // yellow
-            color = TFT_YELLOW;
-          } else if(cur_v>=3) {
-            r=0; g=1; b=0; // green
-            color = TFT_GREEN;
-          } else if(cur_v>=1) {
-            r=0; g=0; b=1; // blue
-            color = TFT_BLUE;
-          } /*else if(cur_v>=1) {
-            r=1; g=0; b=1; // purple
-          }*/
-          // draw the rect
-          //color = color565(r, g, b);
+        if(! (cur_c >= '0' && cur_c <= '9')) continue;  // check if it is a valid int
+        
+        cur_v = (byte)(cur_c - '0');
+        // change color according to value
+        if(cur_v==0) {
+          r=0; g=0; b=0;  // balck
+          color = TFT_BLACK;
+        } else if(cur_v>=7) {
+          r=1; g=0; b=0;  // red
+          color = TFT_RED;
+        } else if(cur_v>=5) {
+          r=1; g=1; b=0;  // yellow
+          color = TFT_YELLOW;
+        } else if(cur_v>=3) {
+          r=0; g=1; b=0; // green
+          color = TFT_GREEN;
+        } /*else if(cur_v>=1) {
+          r=0; g=0; b=1; // blue
+          color = TFT_BLUE;
+        } else if(cur_v>=1) {
+          r=1; g=0; b=1; // purple
+        }*/
 
+/*
 #ifdef DEBUG_OUTPUT
     Serial.print(cur_v);
     Serial.print(",");
@@ -220,23 +240,48 @@ void TFTs::showSpectrogram(const char* equalizer_str) {
     Serial.print(",");
     Serial.println(tft_no);
 #endif
-          //uint16_t color = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | ((b & 0xFF) >> 3);
-          color = ApplyColorDimming(color);
-    
-          // void TFT_eSPI::fillRect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color)  
-          fillRect((bars_in_curr_tft * BARS_WIDTH), (TFT_HEIGHT - BARS_HEIGHT_UNIT * cur_v), BARS_WIDTH, BARS_HEIGHT_UNIT * cur_v, color);
-          
-          // switch tft if necessary
-          bars_in_curr_tft += 1;
-          if (bars_in_curr_tft >= BARS_PER_TFT) {
-            tft_no += 1;
-            if(tft_no>=6) break;  // no space left
-            ChipSelectByNumber(tft_no);
-            //fillScreen(TFT_BLACK); // clear the screen
-            fillRect(0, TFT_HEIGHT/2, TFT_WIDTH, TFT_HEIGHT/2, TFT_BLACK); // only half
-            bars_in_curr_tft = 0;
-          }
+*/
+
+#define SINGLE_DRAW_GRADIENT
+#ifdef SINGLE_DRAW_GRADIENT
+        // single draw
+        //color = color565(r, g, b);
+        //color = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | ((b & 0xFF) >> 3);
+        color = ApplyColorDimming(color);
+        x = (bars_in_curr_tft * BARS_WIDTH) + BARS_WIDTH_SPACING/2;
+        y = (TFT_HEIGHT - BARS_HEIGHT_UNIT * cur_v);
+        w = BARS_WIDTH - BARS_WIDTH_SPACING/2;
+        fillRect(x, y, w, BARS_HEIGHT_UNIT * cur_v, color);
+
+        // switch tft if necessary
+        bars_in_curr_tft += 1;
+        if (bars_in_curr_tft >= BARS_PER_TFT) {
+          tft_no += 1;
+          if(tft_no>=6) break;  // no space left
+          ChipSelectByNumber(tft_no);
+          //fillScreen(TFT_BLACK); // clear the screen
+          fillRect(0, TFT_HEIGHT/2, TFT_WIDTH, TFT_HEIGHT/2, TFT_BLACK); // only half
+          bars_in_curr_tft = 0;
         }
+#else
+        // multiple draws for winamp-like gradient (slower)
+        x = (bars_in_curr_tft * BARS_WIDTH) + BARS_WIDTH_SPACING/2;
+        w = BARS_WIDTH - BARS_WIDTH_SPACING/2;
+        // always draw full bars
+        fillRectVGradient(x, TFT_HEIGHT - TFT_HEIGHT/2, w, TFT_HEIGHT/4, ApplyColorDimming(TFT_RED), ApplyColorDimming(TFT_YELLOW));
+        fillRectVGradient(x, TFT_HEIGHT - TFT_HEIGHT/4, w, TFT_HEIGHT/4, ApplyColorDimming(TFT_YELLOW), ApplyColorDimming(TFT_GREEN));
+        // overwrite with black the unactive part
+        fillRect(x, TFT_HEIGHT - TFT_HEIGHT/2, w, BARS_HEIGHT_UNIT * (9-cur_v), TFT_BLACK);
+        
+        // switch tft if necessary
+        bars_in_curr_tft += 1;
+        if (bars_in_curr_tft >= BARS_PER_TFT) {
+          tft_no += 1;
+          if(tft_no>=6) return;  // no space left
+          ChipSelectByNumber(tft_no);
+          bars_in_curr_tft = 0;
+        }
+#endif
     } //end for
 }
 
@@ -414,7 +459,8 @@ void TFTs::showCustomImage(const char* base64Data) {
           color = alphaBlend(dimming, color, TFT_BLACK);
         } // dimming
 
-        UnpackedImageBuffer[row+y][col+x] = color;
+        //UnpackedImageBuffer[row+y][col+x] = color;
+        drawPixel(col+x, row+y, color);
     } // col
   } // row
   
@@ -422,7 +468,6 @@ void TFTs::showCustomImage(const char* base64Data) {
   
   FileInBuffer = 255;
   
-  // show the img on all TFTs
   for(int i=0 ; i<6 ; i++) {
       ChipSelectByNumber(i);      
       bool oldSwapBytes = getSwapBytes();
